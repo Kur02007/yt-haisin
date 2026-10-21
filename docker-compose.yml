@@ -1,0 +1,81 @@
+services:
+  # 1. Webhook受信サーバー (FastAPI)
+  web:
+    build: .
+    # 本番では --reload を外す（リローダ停止＝受信停止の単一障害点だったため）
+    command: uvicorn main:app --host 0.0.0.0 --port 8195
+    restart: always
+    volumes:
+      - .:/app
+    ports:
+      - "8195:8195"
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+
+  # 2. バックグラウンド処理 (Celery Worker)
+  worker:
+    build: .
+    command: celery -A celery_app:celery_app worker --loglevel=info
+    restart: always
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+
+  # 3. 定期実行スケジューラー (Celery Beat)
+  beat:
+    build: .
+    command: celery -A celery_app:celery_app beat --loglevel=info
+    restart: always
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - redis
+
+  # 4. Discord Bot本体
+  bot:
+    build: .
+    command: python bot.py
+    restart: always
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - db
+
+  # 7. 管理ダッシュボード (現状TLSが無いため、127.0.0.1限定公開＝SSHトンネル経由でのみアクセス可)
+  admin:
+    build: .
+    command: uvicorn admin_app:app --host 0.0.0.0 --port 8196
+    restart: always
+    volumes:
+      - .:/app
+    ports:
+      - "127.0.0.1:8196:8196"
+    env_file: .env
+    depends_on:
+      - db
+
+  # 5. データベース (PostgreSQL)
+  db:
+    image: postgres:13
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: youtube_bot_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 6. メッセージキュー (Redis)
+  redis:
+    image: redis:6-alpine
+    restart: always
+
+volumes:
+  postgres_data:
